@@ -228,25 +228,35 @@ class MiMotionRunner:
 
 # 启动主函数
 def push_to_push_plus(exec_results, summary):
-    # 判断是否需要pushplus推送
+    # 判断是否需要推送（保持原逻辑不变）
     if PUSH_PLUS_TOKEN is not None and PUSH_PLUS_TOKEN != '' and PUSH_PLUS_TOKEN != 'NO':
         if PUSH_PLUS_HOUR is not None and PUSH_PLUS_HOUR.isdigit():
             if time_bj.hour != int(PUSH_PLUS_HOUR):
                 print(f"当前设置push_plus推送整点为：{PUSH_PLUS_HOUR}, 当前整点为：{time_bj.hour}，跳过推送")
                 return
-        html = f'<div>{summary}</div>'
+        
+        # 构建纯文本+Markdown格式内容（去掉所有HTML标签）
+        content = f"{summary}\n\n"  # 摘要先展示，换行分隔
+        
         if len(exec_results) >= PUSH_PLUS_MAX:
-            html += '<div>账号数量过多，详细情况请前往github actions中查看</div>'
+            # 账号过多时的提示（纯文本）
+            content += "⚠️ 账号数量过多，详细情况请前往github actions中查看"
         else:
-            html += '<ul>'
+            # 用Markdown列表展示每个账号的结果（清晰易读）
+            content += "### 详细执行结果\n"
             for exec_result in exec_results:
                 success = exec_result['success']
+                user = exec_result["user"]
+                msg = exec_result["msg"]
                 if success is not None and success is True:
-                    html += f'<li><span>账号：{exec_result["user"]}</span>刷步数成功，接口返回：{exec_result["msg"]}</li>'
+                    # 成功：绿色对勾标识
+                    content += f"- ✅ 账号【{user}】：刷步数成功\n  接口返回：{msg}\n"
                 else:
-                    html += f'<li><span>账号：{exec_result["user"]}</span>刷步数失败，失败原因：{exec_result["msg"]}</li>'
-            html += '</ul>'
-        push_plus(f"{format_now()} 刷步数通知", html)
+                    # 失败：红色叉号标识
+                    content += f"- ❌ 账号【{user}】：刷步数失败\n  失败原因：{msg}\n"
+        
+        # 调用推送函数（保持原调用方式不变）
+        push_plus(f"{format_now()} 刷步数通知", content)
 
 
 def run_single_account(total, idx, user_mi, passwd_mi):
