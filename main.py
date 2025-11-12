@@ -84,23 +84,41 @@ def get_error_code(location):
 
 # pushplus消息推送
 def push_plus(title, content):
-    requestUrl = f"http://www.pushplus.plus/send"
-    data = {
-        "token": PUSH_PLUS_TOKEN,
-        "title": title,
-        "content": content,
-        "template": "html",
-        "channel": "wechat"
+# pushdeer API地址（HTTPS）
+    request_url = "https://api2.pushdeer.com/message/push"
+    
+    # 构建请求参数（对应pushdeer的要求）
+    params = {
+        "pushkey": PUSH_PLUS_TOKEN,
+        "text": title,  # pushdeer的标题参数
+        "desp": content  # pushdeer的内容参数（支持Markdown格式）
     }
+    
     try:
-        response = requests.post(requestUrl, data=data)
+        # 发送GET请求（pushdeer API要求GET方式）
+        response = requests.get(
+            url=request_url,
+            params=params,
+            timeout=10  # 增加超时控制，避免无限等待
+        )
+        
+        # 处理响应
         if response.status_code == 200:
             json_res = response.json()
-            print(f"pushplus推送完毕：{json_res['code']}-{json_res['msg']}")
+            # pushdeer返回格式：{"code":0,"msg":"success","content":...}
+            if json_res.get("code") == 0:
+                print(f"pushdeer推送成功：{json_res['msg']}")
+            else:
+                print(f"pushdeer推送失败：{json_res['code']}-{json_res['msg']}")
         else:
-            print("pushplus推送失败")
-    except:
-        print("pushplus推送异常")
+            print(f"pushdeer推送失败：HTTP状态码{response.status_code}")
+    
+    except requests.exceptions.Timeout:
+        print("pushdeer推送超时")
+    except requests.exceptions.ConnectionError:
+        print("pushdeer推送连接错误")
+    except Exception as e:
+        print(f"pushdeer推送异常：{str(e)}")
 
 
 class MiMotionRunner:
