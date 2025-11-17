@@ -71,7 +71,7 @@ def get_beijing_time():
 
 # 格式化时间
 def format_now():
-    return get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+    return get_beijing_time().strftime("%m-%d %H:%M")
 
 
 # 获取时间戳
@@ -271,7 +271,7 @@ def push_to_push_plus(exec_results, summary):
                     content += f"- ❌ 账号【{user}】：刷步数失败\n  失败原因：{msg}\n"
         
         # 调用推送函数（保持原调用方式不变）
-        push_plus(f"{format_now()} 刷步数通知", content)
+        push_plus(f"🏃🏻🏃🏻‍♀️🏃🏻‍♂️ {format_now()} 步数", content)
 
 
 def run_single_account(total, idx, user_mi, passwd_mi):
