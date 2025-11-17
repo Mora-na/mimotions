@@ -23,14 +23,29 @@ def get_int_value_default(_config: dict, _key, default):
 
 # 获取当前时间对应的最大和最小步数
 def get_min_max_by_time(hour=None, minute=None):
+    # 获取当前北京时间（未传入时/分时自动获取）
     if hour is None:
         hour = time_bj.hour
     if minute is None:
         minute = time_bj.minute
-    time_rate = min((hour * 60 + minute) / (22 * 60), 1)
+    
+    # 获取配置的最小/最大步数（默认值18000/25000）
     min_step = get_int_value_default(config, 'MIN_STEP', 18000)
     max_step = get_int_value_default(config, 'MAX_STEP', 25000)
-    return int(time_rate * min_step), int(time_rate * max_step)
+    
+    # 计算中间分界值（MIN和MAX的平均值，取整数）
+    mid_step = (min_step + max_step) // 2
+    
+    # 定义21:30对应的总分钟数（用于时间判断）
+    TIME_2130 = 21 * 60 + 30  # 1290分钟
+    current_total_min = hour * 60 + minute
+    
+    if current_total_min < TIME_2130:
+        # 21:30前：MIN_STEP ~ 中间值
+        return min_step, mid_step
+    else:
+        # 21:30后：中间值 ~ MAX_STEP
+        return mid_step, max_step
 
 
 # 虚拟ip地址
