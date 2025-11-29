@@ -15,37 +15,58 @@ import requests
 from util.aes_help import  encrypt_data, decrypt_data
 import util.zepp_helper as zeppHelper
 
-# 获取默认值转int
-def get_int_value_default(_config: dict, _key, default):
-    _config.setdefault(_key, default)
-    return int(_config.get(_key))
+# 优先从账号专属配置读取，无则读根配置，最后用默认值（转int）
+def get_int_value_default(account, _config: dict, _key, default):
+    """
+    获取配置值并转为int，优先级：
+    1. STEP_RANGES[account][_key]
+    2. _config[_key]
+    3. default
+    """
+    # 1. 优先读取账号专属配置（STEP_RANGES）
+    step_ranges = _config.get("STEP_RANGES", {})  # 兜底为空字典
+    if isinstance(step_ranges, dict) and account in step_ranges:
+        account_config = step_ranges[account]
+        if isinstance(account_config, dict) and _key in account_config:
+            return int(account_config[_key])  # 账号专属配置存在则返回
+    
+    # 2. 读取根节点配置
+    if _key in _config:
+        return int(_config[_key])
+    
+    # 3. 所有配置都不存在，返回默认值
+    return int(default)
 
 
-# 获取当前时间对应的最大和最小步数
-def get_min_max_by_time(hour=None, minute=None):
-    # 获取当前北京时间（未传入时/分时自动获取）
+# 获取当前时间对应的最大和最小步数（适配账号专属配置）
+def get_min_max_by_time(user_mi, _config: dict, hour=None, minute=None):
+    """
+    根据当前时间和配置（优先账号专属）返回步数范围：
+    - 21:30前：MIN ~ 中间值
+    - 21:30后：中间值 ~ MAX
+    """
+    
+    # 自动获取当前北京时间（未传时分时）
     if hour is None:
         hour = time_bj.hour
     if minute is None:
         minute = time_bj.minute
     
-    # 获取配置的最小/最大步数（默认值18000/25000）
-    min_step = get_int_value_default(config, 'MIN_STEP', 18000)
-    max_step = get_int_value_default(config, 'MAX_STEP', 25000)
+    # 读取步数配置（优先账号专属）
+    min_step = get_int_value_default(user_mi, _config, "MIN_STEP", 18000)
+    max_step = get_int_value_default(user_mi, _config, "MAX_STEP", 25000)
     
-    # 计算中间分界值（MIN和MAX的平均值，取整数）
+    # 计算中间分界值
     mid_step = (min_step + max_step) // 2
     
-    # 定义21:30对应的总分钟数（用于时间判断）
-    TIME_2130 = 21 * 60 + 30  # 1290分钟
+    # 时间判断（21:30为分界点）
+    TIME_2130 = 21 * 60 + 30  # 转换为总分钟数：1290
     current_total_min = hour * 60 + minute
     
     if current_total_min < TIME_2130:
-        # 21:30前：MIN_STEP ~ 中间值
-        return min_step, mid_step
+        return min_step, mid_step  # 21:30前：MIN ~ 中间值
     else:
-        # 21:30后：中间值 ~ MAX_STEP
-        return mid_step, max_step
+        return mid_step, max_step  # 21:30后：中间值 ~ MAX
 
 
 # 虚拟ip地址
@@ -274,15 +295,15 @@ def push_to_push_plus(exec_results, summary):
         push_plus(f"🏃🏻🏃🏻‍♀️🏃🏻‍♂️ {format_now()} 步数", content)
 
 
-def run_single_account(total, idx, user_mi, passwd_mi, user_min_step, user_max_step):
+def run_single_account(total, idx, user_mi, passwd_mi):
     idx_info = ""
     if idx is not None:
         idx_info = f"[{idx + 1}/{total}]"
     log_str = f"[{format_now()}]\n{idx_info}账号：{desensitize_user_name(user_mi)}\n"
     try:
         runner = MiMotionRunner(user_mi, passwd_mi)
-        # 使用账号专属的步数范围
-        exec_msg, success = runner.login_and_post_step(user_min_step, user_max_step)
+        min_step, max_step = get_min_max_by_time()
+        exec_msg, success = runner.login_and_post_step(min_step, max_step)
         log_str += runner.log_str
         log_str += f'{exec_msg}\n'
         exec_result = {"user": user_mi, "success": success,
@@ -302,45 +323,18 @@ def execute():
     exec_results = []
     if len(user_list) == len(passwd_list):
         idx, total = 0, len(user_list)
-        # 准备包含步数范围的用户数据列表
-        user_data_list = []
-        for idx, (user_mi, passwd_mi) in enumerate(zip(user_list, passwd_list)):
-            # 获取账号专属步数范围，未配置则使用全局默认
-            user_range = step_ranges.get(user_mi, {})
-            # 解析并校验最小步数
-            try:
-                user_min = int(user_range.get('min', min_step))
-            except (ValueError, TypeError):
-                user_min = min_step
-                print(f"账号{user_mi}的min_step配置无效，使用全局默认值{min_step}")
-            
-            # 解析并校验最大步数
-            try:
-                user_max = int(user_range.get('max', max_step))
-            except (ValueError, TypeError):
-                user_max = max_step
-                print(f"账号{user_mi}的max_step配置无效，使用全局默认值{max_step}")
-            
-            # 确保最小步数不大于最大步数
-            if user_min > user_max:
-                print(f"账号{user_mi}的min_step({user_min})大于max_step({user_max})，自动交换")
-                user_min, user_max = user_max, user_min
-            
-            user_data_list.append((total, idx, user_mi, passwd_mi, user_min, user_max))
-
         if use_concurrent:
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                # 并发执行时传递包含步数范围的完整参数
-                exec_results = executor.map(lambda x: run_single_account(*x), user_data_list)
+                exec_results = executor.map(lambda x: run_single_account(total, x[0], *x[1]),
+                                            enumerate(zip(user_list, passwd_list)))
         else:
-            for data in user_data_list:
-                exec_results.append(run_single_account(*data))
+            for user_mi, passwd_mi in zip(user_list, passwd_list):
+                exec_results.append(run_single_account(total, idx, user_mi, passwd_mi))
                 idx += 1
                 if idx < total:
+                    # 每个账号之间间隔一定时间请求一次，避免接口请求过于频繁导致异常
                     time.sleep(sleep_seconds)
-        
-        # 后续的结果处理逻辑保持不变...
         if encrypt_support:
             persist_user_tokens()
         success_count = 0
@@ -404,12 +398,6 @@ if __name__ == "__main__":
         config = dict()
         try:
             config = dict(json.loads(os.environ.get("CONFIG")))
-            # 解析账号专属步数范围配置（默认空字典）
-            step_ranges = config.get('STEP_RANGES', {})
-            # 确保配置是字典类型，避免格式错误
-            if not isinstance(step_ranges, dict):
-                step_ranges = {}
-                print("STEP_RANGES配置格式错误，已自动转为空字典")
         except:
             print("CONFIG格式不正确，请检查Secret配置，请严格按照JSON格式：使用双引号包裹字段和值，逗号不能多也不能少")
             traceback.print_exc()
@@ -426,7 +414,6 @@ if __name__ == "__main__":
         if users is None or passwords is None:
             print("未正确配置账号密码，无法执行")
             exit(1)
-        min_step, max_step = get_min_max_by_time()
         use_concurrent = config.get('USE_CONCURRENT')
         if use_concurrent is not None and use_concurrent == 'True':
             use_concurrent = True
