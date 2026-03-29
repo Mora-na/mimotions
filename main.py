@@ -118,43 +118,28 @@ def get_error_code(location):
     return result[0]
 
 
-# pushplus消息推送
-def push_plus(title, content):
-# pushdeer API地址（HTTPS）
-    request_url = "https://api2.pushdeer.com/message/push"
-    
-    # 构建请求参数（对应pushdeer的要求）
+def sc_send(sendkey, title, desp='', options=None):
+    if options is None:
+        options = {}
+    if sendkey.startswith('sctp'):
+        match = re.match(r'sctp(\d+)t', sendkey)
+        if not match:
+            raise ValueError('Invalid sendkey format for sctp')
+        url = f"https://{match.group(1)}.push.ft07.com/send/{sendkey}.send"
+    else:
+        url = f"https://sctapi.ftqq.com/{sendkey}.send"
+
     params = {
-        "pushkey": PUSH_PLUS_TOKEN,
-        "text": title,  # pushdeer的标题参数
-        "desp": content  # pushdeer的内容参数（支持Markdown格式）
+        "title": title,
+        "desp": desp,
+        **options
     }
-    
-    try:
-        # 发送GET请求（pushdeer API要求GET方式）
-        response = requests.get(
-            url=request_url,
-            params=params,
-            timeout=10  # 增加超时控制，避免无限等待
-        )
-        
-        # 处理响应
-        if response.status_code == 200:
-            json_res = response.json()
-            # pushdeer返回格式：{"code":0,"msg":"success","content":...}
-            if json_res.get("code") == 0:
-                print(f"pushdeer推送成功：{json_res['msg']}")
-            else:
-                print(f"pushdeer推送失败：{json_res['code']}-{json_res['msg']}")
-        else:
-            print(f"pushdeer推送失败：HTTP状态码{response.status_code}")
-    
-    except requests.exceptions.Timeout:
-        print("pushdeer推送超时")
-    except requests.exceptions.ConnectionError:
-        print("pushdeer推送连接错误")
-    except Exception as e:
-        print(f"pushdeer推送异常：{str(e)}")
+    headers = {
+        "Content-Type": "application/json;charset=utf-8"
+    }
+    response = requests.post(url, json=params, headers=headers, timeout=10)
+    response.raise_for_status()
+    return response.json()
 
 
 class MiMotionRunner:
@@ -262,37 +247,36 @@ class MiMotionRunner:
         return f"修改步数（{step}）[" + msg + "]", ok
 
 
-# 启动主函数
-def push_to_push_plus(exec_results, summary):
-    # 判断是否需要推送（保持原逻辑不变）
-    if PUSH_PLUS_TOKEN is not None and PUSH_PLUS_TOKEN != '' and PUSH_PLUS_TOKEN != 'NO':
-        if PUSH_PLUS_HOUR is not None and PUSH_PLUS_HOUR.isdigit():
-            if time_bj.hour != int(PUSH_PLUS_HOUR):
-                print(f"当前设置push_plus推送整点为：{PUSH_PLUS_HOUR}, 当前整点为：{time_bj.hour}，跳过推送")
-                return
-        
-        # 构建纯文本+Markdown格式内容（去掉所有HTML标签）
-        content = f"{summary}\n\n"  # 摘要先展示，换行分隔
-        
-        if len(exec_results) >= PUSH_PLUS_MAX:
-            # 账号过多时的提示（纯文本）
-            content += "⚠️ 账号数量过多，详细情况请前往github actions中查看"
+def push_failed_results(exec_results, summary):
+    if SENDKEY is None or SENDKEY == '':
+        print("未配置SENDKEY，跳过Server酱推送")
+        return
+
+    failed_results = [result for result in exec_results if result.get("success") is not True]
+    if not failed_results:
+        print("本次执行无失败账号，跳过Server酱推送")
+        return
+
+    content = f"{summary}\n\n### 失败详情\n"
+    for exec_result in failed_results:
+        user = exec_result["user"]
+        msg = exec_result["msg"]
+        content += f"- 账号【{user}】\n  失败原因：{msg}\n"
+
+    title = f"{format_now()} 步数任务存在失败"
+    try:
+        result = sc_send(SENDKEY, title, content)
+        code = result.get("code")
+        if code == 0:
+            print("Server酱推送成功")
         else:
-            # 用Markdown列表展示每个账号的结果（清晰易读）
-            content += "### 详细执行结果\n"
-            for exec_result in exec_results:
-                success = exec_result['success']
-                user = exec_result["user"]
-                msg = exec_result["msg"]
-                if success is not None and success is True:
-                    # 成功：绿色对勾标识
-                    content += f"- ✅ 账号【{user}】：刷步数成功\n  接口返回：{msg}\n"
-                else:
-                    # 失败：红色叉号标识
-                    content += f"- ❌ 账号【{user}】：刷步数失败\n  失败原因：{msg}\n"
-        
-        # 调用推送函数（保持原调用方式不变）
-        push_plus(f"🏃🏻🏃🏻‍♀️🏃🏻‍♂️ {format_now()} 步数", content)
+            print(f"Server酱推送失败：{result}")
+    except requests.exceptions.Timeout:
+        print("Server酱推送超时")
+    except requests.exceptions.ConnectionError:
+        print("Server酱推送连接错误")
+    except Exception as e:
+        print(f"Server酱推送异常：{str(e)}")
 
 
 def run_single_account(total, idx, user_mi, passwd_mi):
@@ -345,7 +329,7 @@ def execute():
                 success_count += 1
         summary = f"\n执行账号总数{total}，成功：{success_count}，失败：{total - success_count}"
         print(summary)
-        push_to_push_plus(push_results, summary)
+        push_failed_results(push_results, summary)
     else:
         print(f"账号数长度[{len(user_list)}]和密码数长度[{len(passwd_list)}]不匹配，跳过执行")
         exit(1)
@@ -402,9 +386,7 @@ if __name__ == "__main__":
             print("CONFIG格式不正确，请检查Secret配置，请严格按照JSON格式：使用双引号包裹字段和值，逗号不能多也不能少")
             traceback.print_exc()
             exit(1)
-        PUSH_PLUS_TOKEN = config.get('PUSH_PLUS_TOKEN')
-        PUSH_PLUS_HOUR = config.get('PUSH_PLUS_HOUR')
-        PUSH_PLUS_MAX = get_int_value_default('00000000', config, 'PUSH_PLUS_MAX', 30)
+        SENDKEY = os.environ.get("SENDKEY")
         sleep_seconds = config.get('SLEEP_GAP')
         if sleep_seconds is None or sleep_seconds == '':
             sleep_seconds = 5
